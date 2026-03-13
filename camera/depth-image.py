@@ -19,7 +19,7 @@ colorizer = rs.colorizer()
 # Filters for depth frames (smooth within frame, smooth across frames, and hole filling)
 spatial = rs.spatial_filter()
 temporal = rs.temporal_filter()
-hole_filling = rs.hole_filling_filter()
+# hole_filling = rs.hole_filling_filter()
 
 # Filter options
 spatial.set_option(rs.option.filter_magnitude, 2)
@@ -48,7 +48,7 @@ try:
 
         # Convert back to depth and apply hole filling
         depth_frame = disparity_to_depth.process(depth_frame)
-        depth_frame = hole_filling.process(depth_frame)
+        # depth_frame = hole_filling.process(depth_frame)
 
         if not depth_frame or not color_frame:
             continue
