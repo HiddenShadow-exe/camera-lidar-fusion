@@ -30,3 +30,10 @@ https://github.com/XuanKyVN/intel-realsens-camera-with-Python-YoloV11
 
 ## Simple box detection
 ![](images/box-detection.png)
+
+## Box sidewall completion
+In this picture, we can see the raw output of the depth camera converted to a mesh file.
+![](images/box-side-completion-before.png)
+
+After the algorithm runs, the sides of the box are inserted into the point cloud (no faces in the picutre this time).
+![](images/box-side-completion.png)
