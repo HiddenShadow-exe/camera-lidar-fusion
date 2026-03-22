@@ -27,3 +27,6 @@ https://github.com/XuanKyVN/intel-realsens-camera-with-Python-YoloV11
 ![](images/depth-acc-3.png)
 * Reading: 0.29 - 0.42 meters
 * Actual: 0.42 meters
+
+## Simple box detection
+![](images/box-detection.png)
