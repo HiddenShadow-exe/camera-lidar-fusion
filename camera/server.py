@@ -62,9 +62,7 @@ try:
             print(f"An error occurred during streaming: {e}")
 
         finally:
-            pipeline.stop()
             conn.close()
-            server_socket.close()
 
 except KeyboardInterrupt:
     print("\nServer stopped by user...")
