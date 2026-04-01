@@ -3,7 +3,7 @@
 ## Adminisztratív adatok (Administrative)
 * Hallgató neve: Strumpf Dávid
 * Neptun kódja: HYCRXM
-* Email címe: strumpf.david@gmail.com
+* Email címe: strumpf.david [**at**] gmail [**dot**] com
 * Konzulens(ek) neve: Mohammad Khoshkdahan, Nagy Bálint György
 * Önlab tantárgy kódja: VITMAL01
 * Tanév/félév: 2025/2026. 2. félév
