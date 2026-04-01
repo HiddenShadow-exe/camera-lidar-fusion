@@ -20,7 +20,7 @@ Understanding the task, studying other publications on similar topics (e.g. dete
 ### 4. oktatási hét (4. week):
 Feladat részegységekre bontása, tervezés: Kamera adatainak kinyerése, téglatest alakú objektum felismerése, függőleges oldalak beillesztése a pontfelhőbe, kiterjesztés több objektumra, vezeték nélküli megoldás a kamera plafonra történő felszereléséhez, LiDAR adatok kinyerése, tesztkörnyezet felállítása, LiDAR pontfelhő kiegészítése a mélységkamera adatai alapján, tesztelés, evaluáció
 
-Task breakdown, design: Extract camera data, recognize a rectangular object, insert vertical sides into the point cloud, extend to multiple objects, wireless solution for mounting the camera on the ceiling, extract LiDAR data, set up a test environment, agument the LiDAR point cloud based on the depth camera data, testing, evaluation
+Task breakdown, design: Extract camera data, recognize a rectangular object, insert vertical sides into the point cloud, extend to multiple objects, wireless solution for mounting the camera on the ceiling, extract LiDAR data, set up a test environment, LiDAR point cloud completion based on the depth camera data, testing, evaluation
   
 ### 5-6. oktatási hét (5-6. weeks):
 Mélység kamera ismerkedés, RGB és mélység adat egyidejű vizualizációja, pontfelhő generálás mélységmátrixból, objektum-felismerés, oldalfalak beszúrása a pontfelhőbe
@@ -35,7 +35,7 @@ Familiarizing with depth camera, simultaneous visualization of RGB and depth dat
 ### 8-9. oktatási hét (8-9. weeks):
 Ismerkedés a LiDAR-ral, tesztkörnyezet felállítása (LiDAR -> objektum -> takarásban lévő másik objektum; kamera a plafonon), adatok gyűjtése, algoritmus a LiDAR pontfelhő kiegészítésére a kamera alapján
 
-Familiarizing with LiDAR, setting up a test environment (LiDAR -> object -> another object in cover; camera on the ceiling), data collection, algorithm for agumenting the LiDAR point cloud based on the camera
+Familiarizing with LiDAR, setting up a test environment (LiDAR -> object -> another object in cover; camera on the ceiling), data collection, algorithm for LiDAR point completion cloud based on the camera
   
 ### 10-11. oktatási hét (10-11. week):
 Eredmények kiértékelése, hibaszámítás, algoritmus esetleges javítása
@@ -45,7 +45,7 @@ Evaluation of results, error calculation, possible improvement of the algorithm
 ### 12. oktatási hét (12. week):
 Utolsó simítások, javítások. Írásbeli beszámoló nulladik verzió elkészítése, konzulensnek ertékelésre beadás
 
-Final touches, corrections. Preparation of the version 0.1 of the written report, submission to the consultant for evaluation
+Final touches, corrections. Preparation of the version 1.0 of the written report, submission to the consultant for evaluation
   
 ### 13. oktatási hét (13. week):
 Az írásbeli beszámoló végleges, kijavított verziójának beadása, a szóbeli elkészítese
