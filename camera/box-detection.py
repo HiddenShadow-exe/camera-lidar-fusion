@@ -16,6 +16,10 @@ print("Connected! Receiving frames...")
 data = b""
 payload_size = struct.calcsize("Q")
 
+# Detection parameters
+MIN_AREA = 1000        # Minimum contour area (in pixels) to ignore noise
+MIN_EXTENT = 0.75      # How rectangular the object must be (1.0 = perfect rectangle)
+
 try:
     while True:
         # Retrieve message size
@@ -48,48 +52,74 @@ try:
 
         # Generate Colormap
         # Scale the 16-bit depth values to 8-bit (adjust alpha to change contrast)
-        depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(raw_depth, alpha=0.03), cv2.COLORMAP_JET)
+        depth_8bit = cv2.convertScaleAbs(raw_depth, alpha=0.07)
+        depth_colormap = cv2.applyColorMap(depth_8bit, cv2.COLORMAP_JET)
 
-        # Remove invalid values
-        depth_image = np.where(raw_depth == 0, np.nan, raw_depth)
+        # IMAGE PROCESSING
 
-        # Simple threshold
-        min_depth = np.nanmin(depth_image)
-        mask = depth_image < (min_depth + 100)  # tolerance in mm
-        mask = mask.astype(np.uint8) * 255 
+        # 1. Apply a median blur to remove raw depth sensor noise/speckles
+        blurred_depth = cv2.medianBlur(depth_8bit, 15)
 
-        # Clean mask
-        kernel = np.ones((5,5), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask = cv2.medianBlur(mask, 5)
+        # 2. Find depth discontinuities (edges)
+        # https://docs.opencv.org/4.x/da/d22/tutorial_py_canny.html
+        edges = cv2.Canny(blurred_depth, 10, 25)
 
-        # Detect shapes
+        # 3. Clean edges and denoise (erosion, then dilation)
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+        mask = cv2.dilate(mask, kernel, iterations=1)
+
+        # 4. Detect shapes
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        if len(contours) > 0:
-            # Select largest contour
-            cnt = max(contours, key=cv2.contourArea)
+        # Number of boxes
+        n = 0
 
-            # Get smallest rectangle
-            rect = cv2.minAreaRect(cnt)
-            box = cv2.boxPoints(rect)
-            box = np.int32(box)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
             
-            # Draw on the OpenCV-generated colormap
-            cv2.drawContours(depth_colormap, [box], 0, (0,255,0), 2)
-            for p in box:
-                cv2.circle(depth_colormap, tuple(p), 5, (0,0,255), -1)
+            # Filter 1: Ignore small noise
+            if area < MIN_AREA:
+                continue
+
+            # Get smallest bounding rectangle
+            rect = cv2.minAreaRect(cnt)
+            box_width, box_height = rect[1]
+            box_area = box_width * box_height
+
+            if box_area == 0:
+                continue
+
+            # Filter 2: Rectangularity (Extent)
+            # Extent is the ratio of contour area to bounding rectangle area.
+            extent = area / box_area
+
+            # If the shape fills out at least MIN_EXTENT of its bounding box, treat it as a rectangle
+            if extent > MIN_EXTENT:
+                box = cv2.boxPoints(rect)
+                box = np.int32(box)
+                n += 1
+                
+                # Draw the valid box on the colormap
+                cv2.drawContours(depth_colormap, [box], 0, (0, 255, 0), 2)
+                for p in box:
+                    cv2.circle(depth_colormap, tuple(p), 5, (0, 0, 255), -1)
 
 
         # Show both feeds
+        cv2.putText(depth_colormap, f"Number of boxes: {n}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+
         cv2.imshow("Box Detection (Depth)", depth_colormap)
         cv2.imshow("Raw RGB Feed", color_image)
+        cv2.imshow("Edge Mask", mask)
 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
 except Exception as e:
     print(f"Network stream ended or error: {e}")
-    
+
 finally:
     client_socket.close()
     cv2.destroyAllWindows()
