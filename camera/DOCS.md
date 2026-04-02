@@ -37,3 +37,17 @@ In this picture, we can see the raw output of the depth camera converted to a me
 
 After the algorithm runs, the sides of the box are inserted into the point cloud (no faces in the picutre this time).
 ![](images/box-side-completion.png)
+
+## Multi object detection
+Edge mask from depth data:
+![](images/detection-multi-mask.png)
+
+Depth data with detected boxes shown:
+![](images/detection-multi-depth.png)
+
+## Multi object, multi height sidewall completion
+Before:
+![](images/side-completion-multi-before.png)
+
+After:
+![](images/side-completion-multi-after.png)
