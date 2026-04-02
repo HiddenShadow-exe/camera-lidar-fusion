@@ -18,7 +18,7 @@ payload_size = struct.calcsize("Q")
 
 # Detection parameters
 MIN_AREA = 1000        # Minimum contour area (in pixels) to ignore noise
-MIN_EXTENT = 0.75      # How rectangular the object must be (1.0 = perfect rectangle)
+MIN_EXTENT = 0.8       # How rectangular the object must be (1.0 = perfect rectangle)
 
 try:
     while True:
@@ -50,25 +50,33 @@ try:
         raw_depth = frame_dict['depth']
         color_image = frame_dict['color']
 
-        # Generate Colormap
-        # Scale the 16-bit depth values to 8-bit (adjust alpha to change contrast)
+        # IMAGE PRE-PROCESSING
+
+        hole_mask = (raw_depth == 0).astype(np.uint8)
+
+        # Convert to 8-bit for processing
         depth_8bit = cv2.convertScaleAbs(raw_depth, alpha=0.07)
+
+        # Fill holes using inpainting
+        depth_8bit = cv2.inpaint(depth_8bit, hole_mask, 5, cv2.INPAINT_TELEA)
+
+        # Generate Colormap for visualization
         depth_colormap = cv2.applyColorMap(depth_8bit, cv2.COLORMAP_JET)
 
         # IMAGE PROCESSING
 
         # 1. Apply a median blur to remove raw depth sensor noise/speckles
-        blurred_depth = cv2.medianBlur(depth_8bit, 15)
+        blurred_depth = cv2.medianBlur(depth_8bit, 7)
 
         # 2. Find depth discontinuities (edges)
         # https://docs.opencv.org/4.x/da/d22/tutorial_py_canny.html
-        edges = cv2.Canny(blurred_depth, 10, 25)
+        edges = cv2.Canny(blurred_depth, 20, 40)
 
         # 3. Clean edges and denoise (erosion, then dilation)
-        kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        kernel = np.ones((11, 11), np.uint8)
+        mask = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        mask = cv2.dilate(mask, kernel, iterations=1)
+        #mask = cv2.dilate(mask, kernel, iterations=1)
 
         # 4. Detect shapes
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -77,26 +85,33 @@ try:
         n = 0
 
         for cnt in contours:
-            area = cv2.contourArea(cnt)
+            # Bridge gaps using a Convex Hull, this "wraps" the points even if the line is broken
+            hull = cv2.convexHull(cnt)
+            area = cv2.contourArea(hull)
             
-            # Filter 1: Ignore small noise
+            # Ignore small noise
             if area < MIN_AREA:
                 continue
 
-            # Get smallest bounding rectangle
-            rect = cv2.minAreaRect(cnt)
+            # Simplify the shape (Polygonal Approximation)
+            # This helps ignore small wiggles or "missing" chunks of the edge
+            epsilon = 0.04 * cv2.arcLength(hull, True)
+            approx = cv2.approxPolyDP(hull, epsilon, True)
+
+            # Rectangle Check
+            # We look for shapes with roughly 4 corners OR a high "Extent"
+            rect = cv2.minAreaRect(hull)
             box_width, box_height = rect[1]
             box_area = box_width * box_height
 
-            if box_area == 0:
-                continue
+            if box_area == 0: continue
+            extent = area / box_area
 
-            # Filter 2: Rectangularity (Extent)
             # Extent is the ratio of contour area to bounding rectangle area.
             extent = area / box_area
 
-            # If the shape fills out at least MIN_EXTENT of its bounding box, treat it as a rectangle
-            if extent > MIN_EXTENT:
+            # If it has 4-6 vertices (approx) AND it's mostly rectangular (extent)
+            if extent > MIN_EXTENT and len(approx) <= 6:
                 box = cv2.boxPoints(rect)
                 box = np.int32(box)
                 n += 1
