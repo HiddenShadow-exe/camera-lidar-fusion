@@ -3,6 +3,7 @@ import cv2
 import socket
 import struct
 import pickle
+from collections import deque
 
 # Network Setup
 RPI_IP = '192.168.0.10'
@@ -19,6 +20,10 @@ payload_size = struct.calcsize("Q")
 # Detection parameters
 MIN_AREA = 1000        # Minimum contour area (in pixels) to ignore noise
 MIN_EXTENT = 0.8       # How rectangular the object must be (1.0 = perfect rectangle)
+WINDOW_SIZE = 5        # Number of frames to average
+
+# Initialize the frame buffer
+frame_buffer = deque(maxlen=WINDOW_SIZE)
 
 try:
     while True:
@@ -47,10 +52,33 @@ try:
 
         # Deserialize the dictionary
         frame_dict = pickle.loads(frame_data)
-        raw_depth = frame_dict['depth']
+        current_raw_depth = frame_dict['depth']
         color_image = frame_dict['color']
 
-        # IMAGE PRE-PROCESSING
+        # --- SLIDING WINDOW AVERAGING ---
+        
+        # Add current frame to buffer
+        frame_buffer.append(current_raw_depth.astype(np.float32))
+
+        # Compute average depth over the buffer
+        stack = np.array(frame_buffer)
+
+        # Create a mask of valid pixels (where depth > 0)
+        valid_mask = (stack > 0)
+
+        # Sum only the valid pixels
+        sum_valid = np.sum(stack, axis=0)
+        
+        # Count how many frames had valid data for each pixel
+        count_valid = np.sum(valid_mask, axis=0)
+        
+        # Avoid division by zero: if a pixel was 0 in ALL frames, keep it 0.
+        # Otherwise, divide the sum by the count of valid frames.
+        raw_depth = np.divide(sum_valid, count_valid, 
+                              out=np.zeros_like(sum_valid), 
+                              where=count_valid > 0).astype(np.uint16)
+
+        # --- IMAGE PRE-PROCESSING ---
 
         hole_mask = (raw_depth == 0).astype(np.uint8)
 
@@ -63,21 +91,20 @@ try:
         # Generate Colormap for visualization
         depth_colormap = cv2.applyColorMap(depth_8bit, cv2.COLORMAP_JET)
 
-        # IMAGE PROCESSING
+        # --- IMAGE PROCESSING ---
 
         # 1. Apply a median blur to remove raw depth sensor noise/speckles
         blurred_depth = cv2.medianBlur(depth_8bit, 7)
 
         # 2. Find depth discontinuities (edges)
         # https://docs.opencv.org/4.x/da/d22/tutorial_py_canny.html
-        edges = cv2.Canny(blurred_depth, 20, 40)
+        edges = cv2.Canny(blurred_depth, 20, 35)
 
         # 3. Clean edges and denoise (erosion, then dilation)
         kernel = np.ones((11, 11), np.uint8)
         mask = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        #mask = cv2.dilate(mask, kernel, iterations=1)
-
+        
         # 4. Detect shapes
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
