@@ -27,7 +27,7 @@ data = b""
 payload_size = struct.calcsize("Q")
 
 LIDAR_HEIGHT = 0.7
-LIDAR_OFFSET = np.array([0, 0])
+ARUCO_LIDAR_OFFSET = (0.0, 0.0, 0.1)
 
 class VelodyneVisualizer(Node):
     def __init__(self):
@@ -158,10 +158,10 @@ try:
 
                 # Convert to meters
                 z = depth_value / 1000.0
-                x = (center_x - intristics['ppx']) * z / intristics['fx'] + LIDAR_OFFSET[0]
-                y = (center_y - intristics['ppy']) * z / intristics['fy'] + LIDAR_OFFSET[1]
-                lidar_pos = (x, y, z)
-                
+                x = (center_x - intristics['ppx']) * z / intristics['fx']
+                y = (center_y - intristics['ppy']) * z / intristics['fy']
+                lidar_pos = (x + ARUCO_LIDAR_OFFSET[0], y + ARUCO_LIDAR_OFFSET[1], z + ARUCO_LIDAR_OFFSET[2])
+
                 print(f"Marker 3D coordinates: ({x:.2f}m, {y:.2f}m, {z:.2f}m)")
 
             # Assuming the marker is flat on the ground we get the yaw angle
@@ -189,7 +189,7 @@ try:
 
         # Remove ground plane points
         if lidar_pos[2] > 0:
-            ground_threshold = lidar_pos[2] + LIDAR_HEIGHT - 0.1  # A bit above the floor level
+            ground_threshold = lidar_pos[2] + LIDAR_HEIGHT - ARUCO_LIDAR_OFFSET[2] - 0.1
             
             # Keep only points that are "higher" (closer to the ceiling) 
             # than the floor level.
@@ -202,23 +202,28 @@ try:
 
         # --- TRANSFORMATION LOGIC & RENDERING ---
 
-        # Rotation Matrix (180 degrees around X-axis) and yaw rotation from ArUco
-        R_x = np.array([[1, 0, 0],
-                        [0, -1, 0],
-                        [0, 0, -1]])
+        # Coordinate frame rotation (camera OpenCV → LiDAR ROS)
+        R_cam_to_lidar = np.array([[ 1,  0,  0],
+                                   [ 0, -1,  0],
+                                   [ 0,  0, -1]], dtype=np.float64)
+
+        # Yaw rotation in LiDAR/world frame (from ArUco marker)
         R_yaw = np.array([[ np.cos(lidar_yaw_rad), -np.sin(lidar_yaw_rad), 0],
                           [ np.sin(lidar_yaw_rad),  np.cos(lidar_yaw_rad), 0],
-                          [           0,                      0,           1]])
-        R = R_yaw @ R_x
+                          [           0,                      0,           1]], dtype=np.float64)
 
         # Update the points in the camera PCD object
         node.camera_pcd.points = o3d.utility.Vector3dVector(points)
         
         # Apply rotation first, as per the correct order of transformations
-        node.camera_pcd.rotate(R, center=(0, 0, 0))
+        node.camera_pcd.rotate(R_cam_to_lidar, center=(0, 0, 0))
 
         # Inverse translation to align camera points with LiDAR position
-        node.camera_pcd.translate((-lidar_pos[0], lidar_pos[1], 0), relative=False)
+        lidar_pos_transformed = R_cam_to_lidar @ np.array(lidar_pos)
+        node.camera_pcd.translate(-lidar_pos_transformed, relative=True)
+
+        # Apply yaw rotation to align with the orientation of the ArUco marker
+        node.camera_pcd.rotate(R_yaw, center=(0, 0, 0))
 
         # Paint Camera points BLUE
         node.camera_pcd.paint_uniform_color([0.0, 0.0, 1.0])
