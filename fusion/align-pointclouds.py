@@ -26,6 +26,9 @@ print("Connected! Receiving frames...")
 data = b""
 payload_size = struct.calcsize("Q")
 
+LIDAR_HEIGHT = 0.7
+LIDAR_OFFSET = np.array([0, 0])
+
 class VelodyneVisualizer(Node):
     def __init__(self):
         super().__init__('velodyne_visualizer')
@@ -89,6 +92,7 @@ rclpy.init()
 node = VelodyneVisualizer()
 
 lidar_pos = [0.0, 0.0, 0.0]
+lidar_yaw_rad = 0.0
 
 try:
     while True:
@@ -154,12 +158,16 @@ try:
 
                 # Convert to meters
                 z = depth_value / 1000.0
-                x = (center_x - intristics['ppx']) * z / intristics['fx']
-                y = (center_y - intristics['ppy']) * z / intristics['fy']
+                x = (center_x - intristics['ppx']) * z / intristics['fx'] + LIDAR_OFFSET[0]
+                y = (center_y - intristics['ppy']) * z / intristics['fy'] + LIDAR_OFFSET[1]
                 lidar_pos = (x, y, z)
                 
                 print(f"Marker 3D coordinates: ({x:.2f}m, {y:.2f}m, {z:.2f}m)")
 
+            # Assuming the marker is flat on the ground we get the yaw angle
+            if len(c) >= 2:
+                vec = c[1] - c[0]
+                lidar_yaw_rad = np.arctan2(vec[1], vec[0])
 
         # --- GET POINT CLOUD FROM CAMERA DEPTH ---
 
@@ -179,17 +187,29 @@ try:
         valid_mask = (z > 0) & (z < 5.0)
         points = points[valid_mask.reshape(-1)]
 
+        # Remove ground plane points
+        if lidar_pos[2] > 0:
+            ground_threshold = lidar_pos[2] + LIDAR_HEIGHT - 0.1  # A bit above the floor level
+            
+            # Keep only points that are "higher" (closer to the ceiling) 
+            # than the floor level.
+            # In raw camera coords, smaller Z is closer to the ceiling.
+            non_ground_mask = points[:, 2] < ground_threshold
+            points = points[non_ground_mask]
+
         # Downsample camera points for performance
-        points = points[::10]
+        points = points[::2]
 
         # --- TRANSFORMATION LOGIC & RENDERING ---
 
-        # Rotation Matrix (180 degrees around X-axis)
-        R = np.array([
-            [1,  0,  0],
-            [0, -1,  0],
-            [0,  0, -1]
-        ])
+        # Rotation Matrix (180 degrees around X-axis) and yaw rotation from ArUco
+        R_x = np.array([[1, 0, 0],
+                        [0, -1, 0],
+                        [0, 0, -1]])
+        R_yaw = np.array([[ np.cos(lidar_yaw_rad), -np.sin(lidar_yaw_rad), 0],
+                          [ np.sin(lidar_yaw_rad),  np.cos(lidar_yaw_rad), 0],
+                          [           0,                      0,           1]])
+        R = R_yaw @ R_x
 
         # Update the points in the camera PCD object
         node.camera_pcd.points = o3d.utility.Vector3dVector(points)
@@ -197,10 +217,8 @@ try:
         # Apply rotation first, as per the correct order of transformations
         node.camera_pcd.rotate(R, center=(0, 0, 0))
 
-        LIDAR_HEIGHT = 0.7
-
         # Inverse translation to align camera points with LiDAR position
-        node.camera_pcd.translate((-lidar_pos[0], lidar_pos[1], -LIDAR_HEIGHT), relative=False)
+        node.camera_pcd.translate((-lidar_pos[0], lidar_pos[1], 0), relative=False)
 
         # Paint Camera points BLUE
         node.camera_pcd.paint_uniform_color([0.0, 0.0, 1.0])
