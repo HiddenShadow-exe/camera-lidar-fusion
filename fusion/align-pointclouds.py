@@ -27,7 +27,9 @@ data = b""
 payload_size = struct.calcsize("Q")
 
 LIDAR_HEIGHT = 0.7
-ARUCO_LIDAR_OFFSET = (0.0, 0.0, 0.1)
+ARUCO_LIDAR_OFFSET = [0, 0, -0.05]
+
+CALIBRATION_BASED = False
 
 class VelodyneVisualizer(Node):
     def __init__(self):
@@ -139,7 +141,6 @@ try:
         # Detect markers in the color image
         corners, ids, rejected = detector.detectMarkers(color_image)
         
-        # If markers are found, draw them on the color_image
         if ids is not None:
             cv2.aruco.drawDetectedMarkers(color_image, corners)
             
@@ -191,9 +192,7 @@ try:
         if lidar_pos[2] > 0:
             ground_threshold = lidar_pos[2] + LIDAR_HEIGHT - ARUCO_LIDAR_OFFSET[2] - 0.1
             
-            # Keep only points that are "higher" (closer to the ceiling) 
-            # than the floor level.
-            # In raw camera coords, smaller Z is closer to the ceiling.
+            # Keep only points that are "higher" (closer to the ceiling) than the floor level.
             non_ground_mask = points[:, 2] < ground_threshold
             points = points[non_ground_mask]
 
@@ -214,16 +213,26 @@ try:
 
         # Update the points in the camera PCD object
         node.camera_pcd.points = o3d.utility.Vector3dVector(points)
-        
-        # Apply rotation first, as per the correct order of transformations
-        node.camera_pcd.rotate(R_cam_to_lidar, center=(0, 0, 0))
 
-        # Inverse translation to align camera points with LiDAR position
-        lidar_pos_transformed = R_cam_to_lidar @ np.array(lidar_pos)
-        node.camera_pcd.translate(-lidar_pos_transformed, relative=True)
+        if CALIBRATION_BASED:
+            R_calib = np.load("calib/calib_R.npy")
+            t_calib = np.load("calib/calib_t.npy")
 
-        # Apply yaw rotation to align with the orientation of the ArUco marker
-        node.camera_pcd.rotate(R_yaw, center=(0, 0, 0))
+            # Apply calibration-based transform to camera points
+            node.camera_pcd.rotate(R_calib, center=(0, 0, 0))
+            node.camera_pcd.translate(t_calib, relative=True)
+
+        else:
+
+            # Apply rotation first, as per the correct order of transformations
+            node.camera_pcd.rotate(R_cam_to_lidar, center=(0, 0, 0))
+
+            # Inverse translation to align camera points with LiDAR position
+            lidar_pos_transformed = R_cam_to_lidar @ np.array(lidar_pos)
+            node.camera_pcd.translate(-lidar_pos_transformed, relative=True)
+
+            # Apply yaw rotation to align with the orientation of the ArUco marker
+            node.camera_pcd.rotate(R_yaw, center=(0, 0, 0))
 
         # Paint Camera points BLUE
         node.camera_pcd.paint_uniform_color([0.0, 0.0, 1.0])
@@ -235,6 +244,10 @@ try:
         node.vis.update_geometry(node.camera_pcd)
         node.vis.poll_events()
         node.vis.update_renderer()
+
+        # Save pcd on every frame
+        combined_pcd = node.pcd + node.camera_pcd
+        o3d.io.write_point_cloud("combined.ply", combined_pcd)
 
         # Show camera feed with detected markers
         cv2.putText(color_image, f"Lidar Pos: ({lidar_pos[0]:.2f}, {lidar_pos[1]:.2f}, {lidar_pos[2]:.2f})m", 
