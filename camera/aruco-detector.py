@@ -91,20 +91,30 @@ try:
                 cv2.putText(color_image, f"ID: {ids[i][0]}", (center_x, center_y), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 
+                red_corner = c[0]
+                
                 print(f"Detected ArUco Marker ID: {ids[i][0]} at pixel coordinates: ({center_x}, {center_y})")
+                print(f"Red corner pixel coordinates: ({red_corner[0]:.1f}, {red_corner[1]:.1f})")
+                
+                intrisics = load_camera_intrinsics()
 
                 # Convert pixel coordinates to 3D point using depth and camera intrinsics
                 depth_value = raw_depth[center_y, center_x]
                 if depth_value > 0:
-                    # Camera intrinsics
-                    intristics = load_camera_intrinsics()
-
-                    # Convert to meters
                     z = depth_value / 1000.0
-                    x = (center_x - intristics['ppx']) * z / intristics['fx']
-                    y = (center_y - intristics['ppy']) * z / intristics['fy']
+                    x = (center_x - intrisics['ppx']) * z / intrisics['fx']
+                    y = (center_y - intrisics['ppy']) * z / intrisics['fy']
                     
                     print(f"Marker ID {ids[i][0]} 3D coordinates: ({x:.2f}m, {y:.2f}m, {z:.2f}m)")
+
+                # Convert red corner pixel coordinates to 3D point
+                red_depth_value = raw_depth[int(red_corner[1]), int(red_corner[0])]
+                if red_depth_value > 0:
+                    z = red_depth_value / 1000.0
+                    x = (red_corner[0] - intrisics['ppx']) * z / intrisics['fx']
+                    y = (red_corner[1] - intrisics['ppy']) * z / intrisics['fy']
+
+                    print(f"Red corner 3D coordinates: ({x:.2f}m, {y:.2f}m, {z:.2f}m)")
 
 
         # Show both feeds
