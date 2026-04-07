@@ -151,12 +151,31 @@ def get_box_sidewalls(raw_depth, color_image):
 
         floor_depth = np.median(floor_samples) if floor_samples else np.nanmax(raw_depth) / 1000.0
 
+        # We need box center to calculate normals
+        box_center_3d = np.mean(top_corners_3d, axis=0)
+        box_center_3d[2] = (box_depth_m + floor_depth) / 2.0
+
+        def enforce_outward(tri):
+            """Ensures the triangle normal points away from the center of the box."""
+            v0, v1, v2 = np.array(tri[0]), np.array(tri[1]), np.array(tri[2])
+            normal = np.cross(v1 - v0, v2 - v0)
+            tri_center = (v0 + v1 + v2) / 3.0
+            
+            # If the normal points toward the center, swap v1 and v2 to flip it
+            if np.dot(normal, tri_center - box_center_3d) < 0:
+                return [tri[0], tri[2], tri[1]] 
+            return tri
+
         # Get the side rectangles (consisting of 4 points each) by extruding each edge of the box top down to floor_depth
         for i in range(len(top_corners_3d)):
             p1 = top_corners_3d[i]
             p2 = top_corners_3d[(i + 1) % len(top_corners_3d)]
-            sidewall_tris.append([p1, p2, [p2[0], p2[1], floor_depth]])  # Triangle 1
-            sidewall_tris.append([p1, [p1[0], p1[1], floor_depth], [p2[0], p2[1], floor_depth]])  # Triangle 2
+
+            t1 = [p1, p2, [p2[0], p2[1], floor_depth]]
+            t2 = [p1, [p1[0], p1[1], floor_depth], [p2[0], p2[1], floor_depth]]
+
+            sidewall_tris.append(enforce_outward(t1))
+            sidewall_tris.append(enforce_outward(t2))
 
     return sidewall_tris
 
@@ -184,7 +203,10 @@ def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7):
     H  = np.cross(D, E2)                                     # (N, M, 3)
     A  = np.einsum('nmi,nmi->nm', E1, H)                     # (N, M)  dot(E1, H)
 
-    invalid = np.abs(A) < eps
+    # For backface culling, we can check if A < eps. For no culling, we check abs(A) < eps.
+    # invalid = np.abs(A) < eps
+    invalid = A < eps
+
     F  = np.where(invalid, 0.0, 1.0 / A)                     # (N, M)
 
     S  = O - V0                                              # (N, M, 3)
