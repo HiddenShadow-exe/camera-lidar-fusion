@@ -4,13 +4,6 @@ import socket
 import struct
 import pickle
 from collections import deque
-import pyrealsense2 as rs
-import open3d as o3d
-import sys
-import os
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from utils.camera_intrinsics import load_camera_intrinsics
 
 # Network Setup
 RPI_IP = '192.168.0.10'
@@ -32,104 +25,6 @@ WINDOW_SIZE = 5        # Number of frames to average
 # Initialize the frame buffer
 frame_buffer = deque(maxlen=WINDOW_SIZE)
 
-# Params:
-# depth_frame: the raw depth frame from the camera
-# boxes: a list of 4 corners of the detected boxes in pixel coordinates
-def save_pointcloud(raw_depth, boxes):
-    intr = load_camera_intrinsics()
-    h, w = raw_depth.shape
-
-    # --- BUILD INITAL POINT CLOUD ---
-
-    # Create a grid of pixel coordinates
-    u, v = np.meshgrid(np.arange(w), np.arange(h))
-    
-    # Filter out zero-depth pixels
-    z = raw_depth.astype(np.float32) / 1000.0  # Convert mm to meters
-    mask = z > 0
-    
-    z_valid = z[mask]
-    u_valid = u[mask]
-    v_valid = v[mask]
-
-    # Math for Deprojection (Pixel to 3D)
-    x_valid = (u_valid - intr.ppx) * z_valid / intr.fx
-    y_valid = (v_valid - intr.ppy) * z_valid / intr.fy
-    
-    # Scene points (N, 3)
-    scene_points = np.stack((x_valid, y_valid, z_valid), axis=-1)
-
-    # Save raw scene
-    filename_raw = "before.ply"
-    pcd_before = o3d.geometry.PointCloud()
-    pcd_before.points = o3d.utility.Vector3dVector(scene_points)
-    o3d.io.write_point_cloud(filename_raw, pcd_before)
-    print(f"Saved raw point cloud to {filename_raw}")
-
-    # --- EXTRUSION LOGIC ---
-
-    extruded_points_list = []
-    for box in boxes:
-        # Calculate box depth
-        box_center = np.mean(box, axis=0).astype(int)
-        cx, cy = int(np.clip(box_center[0], 0, w - 1)), int(np.clip(box_center[1], 0, h - 1))
-        box_depth_m = raw_depth[cy, cx] / 1000.0
-
-        if box_depth_m == 0: continue
-
-        # Convert each of the 4 box corners from screen space to 3D
-        top_corners_3d = []
-
-        for px, py in box:
-            px_c = np.clip(px, 0, w - 1)
-            py_c = np.clip(py, 0, h - 1)
-            zx = box_depth_m
-            xx = (px_c - intr.ppx) * zx / intr.fx
-            yx = (py_c - intr.ppy) * zx / intr.fy
-            top_corners_3d.append([xx, yx, zx])
-
-        top_corners_3d = np.array(top_corners_3d)  # (4, 3)
-
-        # Calculate floor depth by sampling a point slightly outside the box
-        offset = 15  # pixels outside the box to sample
-        floor_samples = []
-
-        for p in box:
-            # Sample outside the corners
-            sx = int(np.clip(p[0] + offset if p[0] > box_center[0] else p[0] - offset, 0, w - 1))
-            sy = int(np.clip(p[1] + offset if p[1] > box_center[1] else p[1] - offset, 0, h - 1))
-            d = raw_depth[sy, sx]
-            if d > 0: floor_samples.append(d / 1000.0)
-
-        floor_depth = np.median(floor_samples) if floor_samples else np.nanmax(raw_depth) / 1000.0
-
-        # Extrude each edge of the box top down to floor_depth
-        extruded_points = []
-        num_steps = 150
-        for i in range(len(top_corners_3d)):
-            p1 = top_corners_3d[i]
-            p2 = top_corners_3d[(i + 1) % len(top_corners_3d)]
-            for t in np.linspace(0, 1, num_steps):
-                x = p1[0] + t * (p2[0] - p1[0])
-                y = p1[1] + t * (p2[1] - p1[1])
-                for z in np.linspace(p1[2], floor_depth, num_steps):
-                    extruded_points_list.append([x, y, z])
-
-    if extruded_points_list:
-        extruded_np = np.array(extruded_points_list)
-        completed_verts = np.vstack([scene_points, extruded_np])
-    else:
-        completed_verts = scene_points
-
-    # Save completed scene
-    pcd_after = o3d.geometry.PointCloud()
-    pcd_after.points = o3d.utility.Vector3dVector(completed_verts)
-    o3d.io.write_point_cloud("after.ply", pcd_after)
-    print("Saved completed point cloud to after.ply")
-
-    print(f"Number of boxes processed: {len(boxes)}")
-
-    
 try:
     while True:
         # Retrieve message size
@@ -213,7 +108,8 @@ try:
         # 4. Detect shapes
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        boxes = []
+        # Number of boxes
+        n = 0
 
         for cnt in contours:
             # Bridge gaps using a Convex Hull, this "wraps" the points even if the line is broken
@@ -222,6 +118,29 @@ try:
             
             # Ignore small noise
             if area < MIN_AREA:
+                continue
+
+            # --- Depth consistency filter ---
+
+            # Create mask for this contour
+            mask_local = np.zeros(raw_depth.shape, dtype=np.uint8)
+            cv2.drawContours(mask_local, [hull], -1, 255, -1)
+
+            # Extract depth values inside contour
+            depth_values = raw_depth[mask_local == 255]
+            depth_values = depth_values[depth_values > 0]
+
+            if len(depth_values) < 50:
+                continue
+
+            # Compute depth spread
+            z_min = np.percentile(depth_values, 10)
+            z_max = np.percentile(depth_values, 90)
+
+            depth_range = z_max - z_min
+
+            # Top surface = flat and small depth variation
+            if depth_range > 80:   # mm
                 continue
 
             # Simplify the shape (Polygonal Approximation)
@@ -245,7 +164,7 @@ try:
             if extent > MIN_EXTENT and len(approx) <= 6:
                 box = cv2.boxPoints(rect)
                 box = np.int32(box)
-                boxes.append(box)
+                n += 1
                 
                 # Draw the valid box on the colormap
                 cv2.drawContours(depth_colormap, [box], 0, (0, 255, 0), 2)
@@ -254,18 +173,14 @@ try:
 
 
         # Show both feeds
-        cv2.putText(depth_colormap, f"Number of boxes: {len(boxes)}", (10, 30),
+        cv2.putText(depth_colormap, f"Number of boxes: {n}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
 
         cv2.imshow("Box Detection (Depth)", depth_colormap)
         cv2.imshow("Raw RGB Feed", color_image)
         cv2.imshow("Edge Mask", mask)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('s'):
-            save_pointcloud(raw_depth, boxes)
-        if key == ord('q'):
-            break
+        if cv2.waitKey(1) & 0xFF == ord('q'): break
 
 except Exception as e:
     print(f"Network stream ended or error: {e}")
