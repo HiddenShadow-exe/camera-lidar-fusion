@@ -114,7 +114,7 @@ def get_box_sidewalls(raw_depth, color_image):
     #  [p1, p2, p3],  # 3 corners for one triangle of the sidewall
     #  [p1, p3, p4],  # 3 corners for the other triangle of the sidewall
     # ]
-    # Length: number of boxes * 4 sides
+    # Length: number of boxes * 4 sides * 2 triangles per side
     sidewall_tris = []
 
     for box in boxes:
@@ -179,7 +179,7 @@ def get_box_sidewalls(raw_depth, color_image):
 
     return sidewall_tris
 
-def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7):
+def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7, ignore_first=True):
     """
     Vectorized Möller–Trumbore.
     origins:    (N, 3)
@@ -188,6 +188,7 @@ def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7):
     Returns: closest_t (N,), closest_tri (N,), hit_mask (N,)
     """
     N, M = len(directions), len(triangles)
+    if N == 0 or M == 0: return np.zeros((0, 3))
 
     v0    = triangles[:, 0]              # (M, 3)
     edge1 = triangles[:, 1] - v0         # (M, 3)
@@ -223,12 +224,38 @@ def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7):
     ray_idx, tri_idx = np.where(hit)                    # (K,), (K,)
 
     # No hits at all
-    if len(ray_idx) == 0:
-        return np.zeros((0, 3))
+    if len(ray_idx) == 0: return np.zeros((0, 3))
 
     # Compute each hit point: origin + t * direction
     t_vals   = T[ray_idx, tri_idx]                      # (K,)
-    hit_pts  = origins[ray_idx] + t_vals[:, None] * directions[ray_idx]  # (K, 3)
+
+    # If we want all hits, just get all points and return
+    if not ignore_first:
+        hit_pts  = origins[ray_idx] + t_vals[:, None] * directions[ray_idx]  # (K, 3)
+        return hit_pts
+    
+    # If we want to ignore the first hit
+    sort_idx = np.lexsort((t_vals, ray_idx))
+    sorted_ray_idx = ray_idx[sort_idx]
+    sorted_tri_idx = tri_idx[sort_idx]
+    sorted_t_vals  = t_vals[sort_idx]
+
+    # Create a mask to identify the FIRST occurrence of every ray index
+    # (Since they are sorted by T, the first occurrence is the closest hit)
+    # This identifies the start of a new ray's group of hits
+    first_hit_mask = np.concatenate(([True], sorted_ray_idx[1:] != sorted_ray_idx[:-1]))
+
+    # We want to KEEP everything that is NOT the first hit
+    keep_mask = ~first_hit_mask
+
+    final_ray_idx = sorted_ray_idx[keep_mask]
+    final_t_vals  = sorted_t_vals[keep_mask]
+
+    if len(final_ray_idx) == 0:
+        return np.zeros((0, 3))
+
+    # Calculate hit points for 2nd, 3rd... intersections
+    hit_pts = origins[final_ray_idx] + final_t_vals[:, None] * directions[final_ray_idx]
 
     return hit_pts
 
@@ -481,7 +508,8 @@ try:
         hit_points = ray_intersect_triangles_batch(
             origins[valid_rays],
             directions[valid_rays],
-            np.array(triangles_world)
+            np.array(triangles_world),
+            ignore_first=True
         )
 
         print(f"Extended {len(hit_points)} LiDAR points to the detected box sidewalls")
@@ -501,7 +529,7 @@ try:
         node.vis.update_renderer()
 
         # Save pcd on every frame
-        combined_pcd = node.pcd + node.camera_pcd
+        combined_pcd = node.pcd + node.camera_pcd + node.extended_pcd
         o3d.io.write_point_cloud("combined.ply", combined_pcd)
 
         # Show camera feed with detected markers
