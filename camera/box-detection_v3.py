@@ -18,7 +18,7 @@ data = b""
 payload_size = struct.calcsize("Q")
 
 # Detection parameters
-MIN_AREA = 1000        # Minimum contour area (in pixels) to ignore noise
+MIN_AREA = 2000        # Minimum contour area (in pixels) to ignore noise
 MIN_EXTENT = 0.8       # How rectangular the object must be (1.0 = perfect rectangle)
 WINDOW_SIZE = 5        # Number of frames to average
 
@@ -93,92 +93,81 @@ try:
 
         # --- IMAGE PROCESSING ---
 
-        # 1. Apply a median blur to remove raw depth sensor noise/speckles
-        blurred_depth = cv2.medianBlur(depth_8bit, 7)
+        # 1. Work with RAW depth (mm) for the height mask
+        # Apply a light blur to raw depth to handle sensor jitter
+        raw_depth_float = raw_depth.astype(np.float32)
+        raw_depth_blur = cv2.medianBlur(raw_depth_float, 5)
 
-        # 2. Find depth discontinuities (edges)
-        # https://docs.opencv.org/4.x/da/d22/tutorial_py_canny.html
-        edges = cv2.Canny(blurred_depth, 20, 35)
-
-        # 3. Clean edges and denoise (erosion, then dilation)
-        kernel = np.ones((11, 11), np.uint8)
-        mask = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=1)
-
+        # 2. Find the floor in Millimeters
+        valid_depths_mm = raw_depth_blur[raw_depth_blur > 500].flatten() # Ignore camera noise < 50cm
         
-        # 4. Detect shapes
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(valid_depths_mm) > 0:
+            hist, bins = np.histogram(valid_depths_mm, bins=100)
+            floor_mm = bins[np.argmax(hist)]
+            
+            # 1. Height Mask
+            height_mask = ((raw_depth_blur > 100) & (raw_depth_blur < (floor_mm - 150))).astype(np.uint8) * 255
 
-        # Number of boxes
+            # Flatness Mask
+            dzdx = cv2.Sobel(raw_depth_blur, cv2.CV_32F, 1, 0, ksize=1)
+            dzdy = cv2.Sobel(raw_depth_blur, cv2.CV_32F, 0, 1, ksize=1)
+            mag = np.sqrt(dzdx**2 + dzdy**2)
+            
+            # Binary mask: Black where flat, White where steep (the walls)
+            # Raise this number if the box tops are too "holey"
+            flat_mask = (mag > 30.0).astype(np.uint8) * 255
+
+            # Erode then dilate to fill small holes in the flat_mask (the box tops)
+            flat_mask = cv2.morphologyEx(flat_mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+
+            # Then erode to get rid of edge noise
+            flat_mask = cv2.erode(flat_mask, np.ones((7, 7), np.uint8), iterations=1)
+
+            # 4. COMBINE: Subtract non_flat_mask points from height_mask to get our final box mask
+            final_box_mask = cv2.subtract(height_mask, flat_mask)
+
+            # 5. FINAL POLISH
+            # A quick 'Open' to remove any tiny stray pixels
+            final_box_mask = cv2.morphologyEx(final_box_mask, cv2.MORPH_OPEN, np.ones((9, 9), np.uint8))
+
+        # Find contours on the cleaned mask
+        contours, _ = cv2.findContours(final_box_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         n = 0
 
         for cnt in contours:
             # Bridge gaps using a Convex Hull, this "wraps" the points even if the line is broken
             hull = cv2.convexHull(cnt)
             area = cv2.contourArea(hull)
-            
-            # Ignore small noise
+
             if area < MIN_AREA:
                 continue
 
-            # Create mask for this contour
-            mask_local = np.zeros(raw_depth.shape, dtype=np.uint8)
-            cv2.drawContours(mask_local, [hull], -1, 255, -1)
-
-            # Create a Sobel gradient to find "steep" depth changes
-            sobelx = cv2.Sobel(blurred_depth, cv2.CV_64F, 1, 0, ksize=3)
-            sobely = cv2.Sobel(blurred_depth, cv2.CV_64F, 0, 1, ksize=3)
-            gradient_mag = np.sqrt(sobelx**2 + sobely**2)
-
-            # Only keep pixels that are "flat" (low gradient)
-            flat_mask = (mask_local == 255) & (gradient_mag < 0.1)
-            depth_values = raw_depth[flat_mask]
-            depth_values = depth_values[depth_values > 0]
-
-            if len(depth_values) < 50:
+            # Fit a minimum area rectangle to the contour and compute its extent
+            rect = cv2.minAreaRect(hull)
+            box_w, box_h = rect[1]
+            if box_w * box_h == 0:
                 continue
 
-            if len(depth_values) > 0:
-                # Find the most frequent depth (the top surface)
-                hist, bins = np.histogram(depth_values, bins=50)
-                top_surface_depth = bins[np.argmax(hist)]
+            extent = area / (box_w * box_h)
 
-                # Only look at pixels within +/- 30mm of that peak
-                refined_depths = depth_values[np.abs(depth_values - top_surface_depth) < 15]
-                
-                # Now check if this refined surface is large enough to be a box
-                if len(refined_depths) < (len(depth_values) * 0.001): # If less than 25% is flat
-                    continue
-
-            # Simplify the shape (Polygonal Approximation)
-            # This helps ignore small wiggles or "missing" chunks of the edge
             epsilon = 0.04 * cv2.arcLength(hull, True)
             approx = cv2.approxPolyDP(hull, epsilon, True)
 
-            # Rectangle Check
-            # We look for shapes with roughly 4 corners OR a high "Extent"
-            rect = cv2.minAreaRect(hull)
-            box_width, box_height = rect[1]
-            box_area = box_width * box_height
-
-            if box_area == 0: continue
-
-            # Extent is the ratio of contour area to bounding rectangle area.
-            extent = area / box_area
-
-            # If it has 4-6 vertices (approx) AND it's mostly rectangular (extent)
             if extent > MIN_EXTENT and len(approx) <= 6:
                 box = cv2.boxPoints(rect)
                 box = np.int32(box)
-                n += 1
 
-                # Draw the valid box on the colormap
+                # If any of the corners are near the image edge, it's likely a false detection
+                if np.any(box < 10) or np.any(box[:, 0] > (raw_depth.shape[1] - 10)) or np.any(box[:, 1] > (raw_depth.shape[0] - 10)):
+                    continue
+
+                n += 1
                 cv2.drawContours(depth_colormap, [box], 0, (0, 255, 0), 2)
-                cv2.drawContours(color_image, [box], 0, (0, 255, 0), 2)
-                cv2.drawContours(mask, [box], 0, 255, 2)
+                cv2.drawContours(color_image,    [box], 0, (0, 255, 0), 2)
                 for p in box:
                     cv2.circle(depth_colormap, tuple(p), 5, (0, 0, 255), -1)
-                    cv2.circle(color_image, tuple(p), 5, (0, 0, 255), -1)
-                    cv2.circle(mask, tuple(p), 5, 255, -1)
+                    cv2.circle(color_image,    tuple(p), 5, (0, 0, 255), -1)
 
 
         # Show both feeds
@@ -187,7 +176,9 @@ try:
 
         cv2.imshow("Box Detection (Depth)", depth_colormap)
         cv2.imshow("Raw RGB Feed", color_image)
-        cv2.imshow("Edge Mask", mask)
+        cv2.imshow("Combined Mask", final_box_mask)
+        cv2.imshow("1. Height Mask Only", height_mask)
+        cv2.imshow("2. Flatness Mask Only", flat_mask)  
 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
