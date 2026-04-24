@@ -118,10 +118,10 @@ try:
             flat_mask = (mag > 30.0).astype(np.uint8) * 255
 
             # Erode then dilate to fill small holes in the flat_mask (the box tops)
-            flat_mask = cv2.morphologyEx(flat_mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+            flat_mask = cv2.morphologyEx(flat_mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
 
             # Then erode to get rid of edge noise
-            flat_mask = cv2.erode(flat_mask, np.ones((7, 7), np.uint8), iterations=1)
+            flat_mask = cv2.erode(flat_mask, np.ones((11, 11), np.uint8), iterations=1)
 
             # 4. COMBINE: Subtract non_flat_mask points from height_mask to get our final box mask
             final_box_mask = cv2.subtract(height_mask, flat_mask)
@@ -184,6 +184,7 @@ try:
 
 except Exception as e:
     print(f"Network stream ended or error: {e}")
+    raise e
 
 finally:
     client_socket.close()
