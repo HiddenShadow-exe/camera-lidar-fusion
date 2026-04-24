@@ -51,3 +51,8 @@ Before:
 
 After:
 ![](images/side-completion-multi-after.png)
+
+## Improved box detection using 3D pointcloud
+This new method uses 3D pointcloud clustering instead of edge detection on the 2D depth image.
+![](images/improved-box-detection-rgb.png)
+![](images/improved-box-detection.png)
