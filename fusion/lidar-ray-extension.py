@@ -10,6 +10,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2 # type: ignore
 import sensor_msgs_py.point_cloud2 as pc2 # type: ignore
+from scipy.spatial import cKDTree
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.camera_intrinsics import load_camera_intrinsics
@@ -26,8 +27,8 @@ print("Connected! Receiving frames...")
 data = b""
 payload_size = struct.calcsize("Q")
 
-LIDAR_HEIGHT = 0.7
-ARUCO_LIDAR_OFFSET = [0, 0, -0.05]
+LIDAR_HEIGHT = 0.65
+ARUCO_LIDAR_OFFSET = [0, 0, 0.05]
 
 CALIBRATION_BASED = False
 
@@ -188,7 +189,7 @@ def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7, igno
     Returns: closest_t (N,), closest_tri (N,), hit_mask (N,)
     """
     N, M = len(directions), len(triangles)
-    if N == 0 or M == 0: return np.zeros((0, 3))
+    if N == 0 or M == 0: return np.zeros((0, 3)), np.zeros((0,), dtype=int), np.zeros((0,), dtype=bool)
 
     v0    = triangles[:, 0]              # (M, 3)
     edge1 = triangles[:, 1] - v0         # (M, 3)
@@ -224,7 +225,7 @@ def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7, igno
     ray_idx, tri_idx = np.where(hit)                    # (K,), (K,)
 
     # No hits at all
-    if len(ray_idx) == 0: return np.zeros((0, 3))
+    if len(ray_idx) == 0: return np.zeros((0, 3)), np.zeros((0,), dtype=int), np.zeros((0,), dtype=bool)
 
     # Compute each hit point: origin + t * direction
     t_vals   = T[ray_idx, tri_idx]                      # (K,)
@@ -232,7 +233,7 @@ def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7, igno
     # If we want all hits, just get all points and return
     if not ignore_first:
         hit_pts  = origins[ray_idx] + t_vals[:, None] * directions[ray_idx]  # (K, 3)
-        return hit_pts
+        return hit_pts, ray_idx, tri_idx
     
     # If we want to ignore the first hit
     sort_idx = np.lexsort((t_vals, ray_idx))
@@ -252,12 +253,13 @@ def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7, igno
     final_t_vals  = sorted_t_vals[keep_mask]
 
     if len(final_ray_idx) == 0:
-        return np.zeros((0, 3))
+        return np.zeros((0, 3)), np.zeros((0,), dtype=int), np.zeros((0,), dtype=bool)
 
     # Calculate hit points for 2nd, 3rd... intersections
     hit_pts = origins[final_ray_idx] + final_t_vals[:, None] * directions[final_ray_idx]
 
-    return hit_pts
+    # Also return the indices of the triangles that were hit
+    return hit_pts, final_ray_idx, sorted_tri_idx[keep_mask]
 
 
 class VelodyneVisualizer(Node):
@@ -505,28 +507,50 @@ try:
         valid_rays = norms[:, 0] > 0
         directions = np.where(valid_rays[:, None], vecs / np.where(norms > 0, norms, 1), 0)
 
-        hit_points = ray_intersect_triangles_batch(
+        hit_points, hit_ray_idx, hit_tri_idx = ray_intersect_triangles_batch(
             origins[valid_rays],
             directions[valid_rays],
             np.array(triangles_world),
             ignore_first=True
         )
 
-        print(f"Extended {len(hit_points)} LiDAR points to the detected box sidewalls")
+        # Add some random noise in the direction of the plane normal to somewhat simulate the LiDAR hitting the side of the box instead of perfectly grazing it
+        if len(hit_points) > 0:
+            # 1. Get the pre-calculated normals for the specific triangles hit
+            # (Assuming you updated ray_intersect to return tri_indices)
+            tri_normals = np.cross(triangles_world[:, 1] - triangles_world[:, 0], 
+                                   triangles_world[:, 2] - triangles_world[:, 0])
+            # Normalize them
+            norms = np.linalg.norm(tri_normals, axis=1, keepdims=True)
+            tri_normals = np.divide(tri_normals, norms, out=np.zeros_like(tri_normals), where=norms > 0)
 
-        node.extended_pcd.points = o3d.utility.Vector3dVector(hit_points)
+            # 2. Get the specific normal for each hit point
+            # No KDTree needed if you return tri_indices from the raycaster
+            normals_at_hits = tri_normals[hit_tri_idx]  # (K, 3)
 
-        # Paint extended points green
-        node.extended_pcd.paint_uniform_color([0.0, 1.0, 0.0])
+            # 3. Generate RANDOM noise for each point
+            # This creates values between -0.01 and +0.01 (2cm total spread)
+            noise_magnitude = 0.02 
+            random_offsets = (np.random.rand(len(hit_points), 1) - 0.5) * noise_magnitude
 
-        if node.is_first_extended_frame:
-            node.vis.add_geometry(node.extended_pcd)
-            node.is_first_extended_frame = False
+            # 4. Apply the noise along the normal vector
+            hit_points += normals_at_hits * random_offsets
 
-        node.vis.update_geometry(node.extended_pcd)
+            print(f"Extended {len(hit_points)} LiDAR points to the detected box sidewalls")
 
-        node.vis.poll_events()
-        node.vis.update_renderer()
+            node.extended_pcd.points = o3d.utility.Vector3dVector(hit_points)
+
+            # Paint extended points green
+            node.extended_pcd.paint_uniform_color([0.0, 1.0, 0.0])
+
+            if node.is_first_extended_frame:
+                node.vis.add_geometry(node.extended_pcd)
+                node.is_first_extended_frame = False
+
+            node.vis.update_geometry(node.extended_pcd)
+
+            node.vis.poll_events()
+            node.vis.update_renderer()
 
         # Save pcd on every frame
         combined_pcd = node.pcd + node.camera_pcd + node.extended_pcd
