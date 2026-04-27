@@ -33,7 +33,7 @@ GROUND_THRESHOLD = 2.6  # Meters. Points above this are considered non-ground.
 # Initialize the frame buffer
 frame_buffer = deque(maxlen=WINDOW_SIZE)
 
-def get_3d_box_top(camera_pcd, intrinsics, h, w, floor_z):
+def get_boxes_3d(camera_pcd, intrinsics, h, w, floor_z):
     """Detect boxes in the point cloud and return the 3D coordinates of their top faces as well as the sidewall triangles."""
 
     # Downsample for speed
@@ -96,8 +96,6 @@ def get_3d_box_top(camera_pcd, intrinsics, h, w, floor_z):
             (box_3d_top[0][1] + box_3d_top[2][1]) / 2,
             (top_z + floor_z) / 2.0
         ])
-
-        print(f"Detected box with volume {box_volume:.4f} m^3 (Width: {box_width:.2f}m, Length: {box_length:.2f}m, Height: {box_height:.2f}m)")
 
         def enforce_outward(tri):
             """Ensures the triangle normal points away from the center of the box."""
@@ -236,7 +234,7 @@ try:
         h, w = processed_depth.shape
 
         # Get box corners
-        box_corners, sidewall_tris = get_3d_box_top(camera_pcd, intrinsics, h, w, GROUND_THRESHOLD)
+        box_corners, sidewall_tris = get_boxes_3d(camera_pcd, intrinsics, h, w, GROUND_THRESHOLD)
 
         # Visualize
         vis_image = depth_colormap.copy()
