@@ -12,6 +12,7 @@ Using an ArUco marker on the top of the LiDAR, we can detect its position, and w
 1. Detect marker in screen space
 2. Sample detph data $(d)$ at the center of the marker $(u, v)$
 3. Convert to 3D coordinates
+
 $$
 \begin{cases} 
 z = \frac{d}{1000} \\
@@ -27,20 +28,23 @@ In addition to this, we get the markers yaw rotation relative to the camera and 
 $$
 \psi = \operatorname{atan2}(y_1 - y_0, x_1 - x_0)
 $$
+
 Where $(x_0, y_0)$ is the top-left corner and $(x_1, y_1)$ is the top-right corner.
 
 ## Get pointcloud from camera depth data
 1. Using the depth data from the camera, we generate a 3D pointcloud. For every pixel, we use the above mentioned formula to convert each point to 3D space.
 2. Filter invalid points that are either too close or too far away
 3. Remove ground plane points
+
 $$
 z_{\text{ground}} = z_{\text{lidar}} + H_{\text{lidar}} - \text{offset}_z - \epsilon
 $$
 
 ## Transformation logic
 1. Roate camera points (flip $y$ and $z$ axes)
+
 $$
-R_{\text{cam\_to\_lidar}} = \begin{bmatrix} 
+R_{cam\_to\_lidar} = \begin{bmatrix} 
 1 & 0 & 0 \\ 
 0 & -1 & 0 \\ 
 0 & 0 & -1 
@@ -48,6 +52,7 @@ R_{\text{cam\_to\_lidar}} = \begin{bmatrix}
 $$
 
 2. Translate
+
 $$
 \mathbf{t} = R_{\text{cam\_to\_lidar}} \times \mathbf{P}_{\text{lidar}}
 $$
@@ -56,6 +61,7 @@ $$
 $$
 
 3. Apply rotation to camera points
+
 $$
 R_{yaw} = \begin{bmatrix} 
 \cos(\psi) & -\sin(\psi) & 0 \\ 
@@ -68,17 +74,22 @@ $$
 1. Downsample depth pointcloud for performance (1cm voxelized)
 2. Cluster points using Open3D's `cluster_dbscan`
 3. For each cluster, find the heighest point, then discard every point below a certain threshold (10cm), so only the top of the box remains in the cluster
+
 $$
 P_z < Z_{top} - \theta
 $$
+
 4. Project this back to 2D and fit a minimal rectangle around the pixel points
+
 $$
 u = \frac{X \cdot f_x}{Z} + c_x
 $$
 $$
 v = \frac{Y \cdot f_y}{Z} + c_y
 $$
+
 5. Project the 4 corners of the rectangle back to 3D, so we get the top face of the box
+
 $$
 X_w = \frac{(p_x - c_x) Z_{top}}{f_x}
 $$
@@ -89,8 +100,11 @@ $$
 ### Sidewall generation
 We assume the sidewalls to be vertical. We triangulate the space between the detected top plane and the calculated floor plane
 * For each corner $i \in \{0, 1, 2, 3\}$, the bottom vertices are derived from the top vertices by substituting the floor depth:
+
 $$P_{i, \text{bottom}} = [X_{i, \text{top}}, Y_{i, \text{top}}, Z_{\text{floor}}]$$
+
 * For each side we have two triangles:
+
 $$
 \begin{aligned}
 T_1 &= [P_{i, \text{top}}, P_{i+1, \text{top}}, P_{i+1, \text{bottom}}]
@@ -98,7 +112,9 @@ T_1 &= [P_{i, \text{top}}, P_{i+1, \text{top}}, P_{i+1, \text{bottom}}]
 T_2 &= [P_{i, \text{top}}, P_{i, \text{bottom}}, P_{i+1, \text{bottom}}]
 \end{aligned}
 $$
+
 * Finally, each triangle is processed to guarantee its normal vector points outward from the box center:
+
 $$
 \begin{aligned}
 \mathbf{n} &= (\mathbf{v}_1 - \mathbf{v}_0) \times (\mathbf{v}_2 - \mathbf{v}_0)
@@ -113,14 +129,18 @@ $$
 After having a list of triangles, we are ready to generate the occluded LiDAR points. We perform a ray-triangle intersection test for every LiDAR ray against each triangle.
 
 1. Near-Field Culling: get rid of invalid triangles that are too close to the LiDAR
+
 $$
 \|\text{centroid}_{tri} - \mathbf{P}_{lidar}\| > d_{min}
 $$
+
 2. Transform triangles to world space using the same transformation logic mentioned above (triangle detection runs in camera space)
 3. Run Möller–Trumbore
+
 $$
 \mathbf{\hat{d}}_i = \frac{\mathbf{P}_i - \mathbf{O}}{\|\mathbf{P}_i - \mathbf{O}\|}
 $$
+
 4. Sort the hits by distance from the origin, then discard the one closest to the LiDAR (the LiDAR sees this point by itself; it's not occluded)
 
 ## Evaluation
