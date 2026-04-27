@@ -26,7 +26,7 @@ Where $f$ represents the focal length and $c$ represents the principal point fro
 In addition to this, we get the markers yaw rotation relative to the camera and save it for the next step.
 
 $$
-\psi = \operatorname{atan2}(y_1 - y_0, x_1 - x_0)
+\psi = \mathrm{atan2}(y_1 - y_0, x_1 - x_0)
 $$
 
 Where $(x_0, y_0)$ is the top-left corner and $(x_1, y_1)$ is the top-right corner.
@@ -44,7 +44,7 @@ $$
 1. Roate camera points (flip $y$ and $z$ axes)
 
 $$
-R_{cam\_to\_lidar} = \begin{bmatrix} 
+\mathbf{R}_{\text{cam\\_to\\_lidar}} = \begin{bmatrix} 
 1 & 0 & 0 \\ 
 0 & -1 & 0 \\ 
 0 & 0 & -1 
@@ -54,7 +54,7 @@ $$
 2. Translate
 
 $$
-\mathbf{t} = R_{\text{cam\_to\_lidar}} \times \mathbf{P}_{\text{lidar}}
+\mathbf{t} = \mathbf{R}_{\mathrm{cam\\_to\\_lidar}} \times \mathbf{P}_{\text{lidar}}
 $$
 $$
 \mathbf{P}_{\text{pcd}} \leftarrow \mathbf{P}_{\text{pcd}} - \mathbf{t}
@@ -63,7 +63,7 @@ $$
 3. Apply rotation to camera points
 
 $$
-R_{yaw} = \begin{bmatrix} 
+\mathbf{R}_{yaw} = \begin{bmatrix} 
 \cos(\psi) & -\sin(\psi) & 0 \\ 
 \sin(\psi) & \cos(\psi) & 0 \\ 
 0 & 0 & 1 
