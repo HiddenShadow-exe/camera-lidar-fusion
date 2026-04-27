@@ -10,7 +10,7 @@
 Using an ArUco marker on the top of the LiDAR, we can detect its position, and with the help of depth data, we can get the LiDAR's exact 3D position relative to the camera.
 
 1. Detect marker in screen space
-2. Sample detph data $(d)$ at the center of the marker $(u, v)$
+2. Sample depth data $(d)$ at the center of the marker $(u, v)$
 3. Convert to 3D coordinates
 
 $$
@@ -32,7 +32,7 @@ $$
 Where $(x_0, y_0)$ is the top-left corner and $(x_1, y_1)$ is the top-right corner.
 
 ## Get pointcloud from camera depth data
-1. Using the depth data from the camera, we generate a 3D pointcloud. For every pixel, we use the above mentioned formula to convert each point to 3D space.
+1. Using the depth data from the camera, we generate a 3D pointcloud. For every pixel, we use the above-mentioned formula to convert each point to 3D space.
 2. Filter invalid points that are either too close or too far away
 3. Remove ground plane points
 
@@ -71,9 +71,9 @@ $$
 $$
 
 ## Box detection
-1. Downsample depth pointcloud for performance (1cm voxelized)
+1. Down sample depth pointcloud for performance (1cm voxelized)
 2. Cluster points using Open3D's `cluster_dbscan`
-3. For each cluster, find the heighest point, then discard every point below a certain threshold (10cm), so only the top of the box remains in the cluster
+3. For each cluster, find the highest point, then discard every point below a certain threshold (10cm), so only the top of the box remains in the cluster
 
 $$
 P_z < Z_{top} - \theta
@@ -124,6 +124,9 @@ $$
 \text{If} \ & \ \mathbf{n} \cdot \mathbf{v}_{out} < 0 \to \text{flip normal}
 \end{aligned}
 $$
+
+### Result
+![](images/box-detection.png)
 
 ## Point generation
 After having a list of triangles, we are ready to generate the occluded LiDAR points. We perform a ray-triangle intersection test for every LiDAR ray against each triangle.
@@ -239,7 +242,7 @@ Precision:       100.00%
 
 ## Reason for the errors
 ### Rotational inaccuracy
-As seen in Example 5, the rotational (yaw)alignment of the LiDAR and camera pointclouds couses inaccuracies. This is caused by the instable detection of the ArUco marker on top of the LiDAR. The marker is relatively far away form the camera, so it takes up a very small part of the image (around 20-30 pixels). This caueses detection instabilities. At this scale, a single pixel difference in the detection applies mulitple degrees of yaw rotation to the camera pointcloud, resulting in slight misalignment between it and the LiDAR pointcloud.
+As seen in Example 5, the rotational (yaw)alignment of the LiDAR and camera pointclouds couses inaccuracies. This is caused by the unstable detection of the ArUco marker on top of the LiDAR. The marker is relatively far away from the camera, so it takes up a very small part of the image (around 20-30 pixels). This causes detection instabilities. At this scale, a single pixel difference in the detection applies multiple degrees of yaw rotation to the camera pointcloud, resulting in slight misalignment between it and the LiDAR pointcloud.
 
 In the following picture the tiny bit of rotational inaccuracy is visible by looking at the bottom right box.
 ![](images/pointcloud-alignment.png)
@@ -253,4 +256,4 @@ The box detection relies on clustering. If some noisy points find their way insi
 The depth values of the camera tend to be inaccurate at the edge of a box. If the camera doesn't see the box directly from the top but from a perspective, it samples depth values from the side of the box too. The transition from the top face of the box to the side face is not a sharp edge but a slight curve. The points "bend down" towards the edge instead of forming a well distinguishable edge.
 
 ### Alignment inaccuracy
-The depth detecton of the ArUco marker is also marginally inaccuare. It has been tested that the depth camera gets slightly inaccuare at 2-3 meters. The $(x, y)$ position detection is also a tiny bit inaccurate (sub pixel inaccuracy). All these errors get carried through the entire pipeline, resulting in box detection and point generation inaccuracies.
+The depth detection of the ArUco marker is also marginally inaccurate. It has been tested that the depth camera gets slightly inaccurate at 2-3 meters. The $(x, y)$ position detection is also a tiny bit inaccurate (sub-pixel inaccuracy). All these errors get carried through the entire pipeline, resulting in box detection and point generation inaccuracies.
