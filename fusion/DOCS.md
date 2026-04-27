@@ -14,11 +14,11 @@ Using an ArUco marker on the top of the LiDAR, we can detect its position, and w
 3. Convert to 3D coordinates
 
 $$
-\begin{cases} 
-z = \frac{d}{1000} \\
-x = \frac{(u - c_x) z}{f_x} \\
-y = \frac{(v - c_y) z}{f_y}
-\end{cases}
+\begin{aligned} 
+z &= \frac{d}{1000} \\
+x &= \frac{(u - c_x) z}{f_x} \\
+y &= \frac{(v - c_y) z}{f_y}
+\end{aligned}
 $$
 
 Where $f$ represents the focal length and $c$ represents the principal point from the camera intrinsics.
