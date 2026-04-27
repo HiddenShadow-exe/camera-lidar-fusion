@@ -33,10 +33,9 @@ ARUCO_LIDAR_OFFSET = [0, 0, 0]
 
 CALIBRATION_BASED = False
 
-VOXEL_SIZE = 0.03 # meters
+VOXEL_SIZE = 0.05 # meters
 
 # Evaluation / Recording Setup
-MODE = "RECORD_OCCLUDED"   # "RECORD_OCCLUDED" | "RECORD_GT" | "EVALUATE"
 VOXEL_RECORD_DIR  = "voxel_recordings"
 
 # Detection parameters
@@ -66,6 +65,20 @@ def points_to_voxel_mesh(points, color, voxel_size):
     combined.paint_uniform_color(color)
     combined.compute_vertex_normals()
     return combined
+
+def project_3d_to_2d(pts_3d, intrinsics):
+    """Project Nx3 points (meters) to Nx2 pixel coordinates."""
+    x = pts_3d[:, 0]
+    y = pts_3d[:, 1]
+    z = pts_3d[:, 2]
+    
+    # Avoid division by zero
+    z_eff = np.where(z == 0, 0.001, z)
+    
+    u = (x * intrinsics['fx'] / z_eff) + intrinsics['ppx']
+    v = (y * intrinsics['fy'] / z_eff) + intrinsics['ppy']
+    
+    return np.stack((u, v), axis=-1).astype(np.int32)
 
 def get_box_sidewalls(raw_depth, color_image):
     # --- IMAGE PRE-PROCESSING ---
@@ -230,6 +243,97 @@ def get_box_sidewalls(raw_depth, color_image):
 
     return sidewall_tris
 
+def get_boxes_3d(camera_pcd, intrinsics, h, w, floor_z):
+    """Detect boxes in the point cloud and return the 3D coordinates of their top faces as well as the sidewall triangles."""
+
+    # Downsample for speed
+    pcd_small = camera_pcd.voxel_down_sample(voxel_size=0.01)
+    
+    # Cluster in 3D to find individual boxes
+    labels = np.array(pcd_small.cluster_dbscan(eps=0.15, min_points=200))
+    if len(labels) == 0: return [], []
+    
+    box_tops = []
+    sidewall_tris = []
+    for i in range(labels.max() + 1):
+        cluster_indices = np.where(labels == i)[0]
+        cluster_pts = np.asarray(pcd_small.points)[cluster_indices]
+
+        if len(cluster_pts) < 200: continue  # Skip small clusters
+        
+        # Find the heighest point in the cluster (the box top)
+        top_z = np.min(cluster_pts[:, 2])
+
+        # Only keep points that are within 15cm of the top
+        # This discards the potential side points that cause stretching
+        top_plane_mask = cluster_pts[:, 2] < (top_z + 0.15)
+        top_plane_pts = cluster_pts[top_plane_mask]
+        
+        # Project cluster to 2D pixels to find the bounding box
+        u = (top_plane_pts[:, 0] * intrinsics['fx'] / top_plane_pts[:, 2]) + intrinsics['ppx']
+        v = (top_plane_pts[:, 1] * intrinsics['fy'] / top_plane_pts[:, 2]) + intrinsics['ppy']
+        pixel_pts = np.stack((u, v), axis=1).astype(np.float32)
+        
+        # Fit a 2D rectangle to these pixels
+        rect = cv2.minAreaRect(pixel_pts)
+        box_2d_pixels = cv2.boxPoints(rect) # The 4 corners in pixels
+
+        # If the box is too close to the edge of the image, ignore it (likely noise)
+        if np.any(box_2d_pixels < 10) or np.any(box_2d_pixels[:, 0] > w - 10) or np.any(box_2d_pixels[:, 1] > h - 10):
+            continue
+        
+        # Back-project those 4 pixel corners back to 3D at the 'top_z' height
+        # This gives us a mathematically perfect 3D rectangle at the box's top
+        box_3d_top = []
+        for px, py in box_2d_pixels:
+            world_x = (px - intrinsics['ppx']) * top_z / intrinsics['fx']
+            world_y = (py - intrinsics['ppy']) * top_z / intrinsics['fy']
+            box_3d_top.append([world_x, world_y, top_z])
+
+        # Calculate volume of box and drop if it's too small
+        box_width = np.linalg.norm(np.array(box_3d_top[1]) - np.array(box_3d_top[0]))
+        box_length = np.linalg.norm(np.array(box_3d_top[2]) - np.array(box_3d_top[1]))
+        box_height = np.abs(top_z - floor_z)
+        box_volume = box_width * box_length * box_height
+
+        if box_volume < 0.01:  # Less than 10 liters, likely noise
+            continue
+            
+        box_tops.append(np.array(box_3d_top))
+
+        box_center_3d = np.array([
+            (box_3d_top[0][0] + box_3d_top[2][0]) / 2,
+            (box_3d_top[0][1] + box_3d_top[2][1]) / 2,
+            (top_z + floor_z) / 2.0
+        ])
+
+        def enforce_outward(tri):
+            """Ensures the triangle normal points away from the center of the box."""
+            v0, v1, v2 = np.array(tri[0]), np.array(tri[1]), np.array(tri[2])
+            normal = np.cross(v1 - v0, v2 - v0)
+            tri_center = (v0 + v1 + v2) / 3.0
+            if np.dot(normal, tri_center - box_center_3d) < 0:
+                return [tri[0], tri[2], tri[1]] 
+            return tri
+        
+        for j in range(4):
+            # 3D corners of the TOP face
+            p1_top = box_3d_top[j]
+            p2_top = box_3d_top[(j + 1) % 4]
+            
+            # 3D corners of the BOTTOM face (same X,Y but floor Z)
+            p1_bot = [p1_top[0], p1_top[1], floor_z]
+            p2_bot = [p2_top[0], p2_top[1], floor_z]
+            
+            # Create the two triangles for this vertical wall
+            t1 = [p1_top, p2_top, p2_bot]
+            t2 = [p1_top, p1_bot, p2_bot]
+            
+            sidewall_tris.append(enforce_outward(t1))
+            sidewall_tris.append(enforce_outward(t2))
+        
+    return box_tops, sidewall_tris
+
 def ray_intersect_triangles_batch(origins, directions, triangles, eps=1e-7, ignore_first=True):
     """
     Vectorized Möller–Trumbore.
@@ -324,6 +428,7 @@ class VelodyneVisualizer(Node):
         )
 
         self.raw_lidar_points = np.array([])
+        self.raw_camera_pcd = o3d.geometry.PointCloud()
 
         # Open3D visualizer setup
         self.vis = o3d.visualization.Visualizer()
@@ -427,6 +532,18 @@ try:
         raw_depth = frame_dict['depth']
         color_image = frame_dict['color']
 
+        # --- IMAGE PRE-PROCESSING ---
+        hole_mask = (raw_depth == 0).astype(np.uint8)
+
+        # Convert to 8-bit for processing
+        depth_8bit = cv2.convertScaleAbs(raw_depth, alpha=0.07)
+
+        # Fill holes using inpainting
+        depth_8bit = cv2.inpaint(depth_8bit, hole_mask, 5, cv2.INPAINT_TELEA)
+
+        # Generate Colormap for visualization
+        depth_colormap = cv2.applyColorMap(depth_8bit, cv2.COLORMAP_JET)
+
         # --- ARUCO DETECTION & LIDAR POSITION DETECTION ---
 
         # Define the dictionary and parameters
@@ -494,9 +611,6 @@ try:
             non_ground_mask = points[:, 2] < ground_threshold
             points = points[non_ground_mask]
 
-        # Downsample camera points for performance
-        points = points[::2]
-
         # --- TRANSFORMATION LOGIC & RENDERING ---
 
         # Coordinate frame rotation (camera OpenCV → LiDAR ROS)
@@ -511,6 +625,7 @@ try:
 
         # Update the points in the camera PCD object
         node.camera_pcd.points = o3d.utility.Vector3dVector(points)
+        node.raw_camera_pcd = copy.deepcopy(node.camera_pcd)
 
         if CALIBRATION_BASED:
             R_calib = np.load("calib/calib_R.npy")
@@ -555,7 +670,29 @@ try:
         # --- LIDAR RAY EXTENSION LOGIC ---
 
         # Get box sidewalls
-        sidewall_tris = get_box_sidewalls(raw_depth, color_image)
+        box_tops, sidewall_tris = get_boxes_3d(
+            node.raw_camera_pcd,
+            intrinsics,
+            h, w,
+            floor_z=lidar_pos[2] + LIDAR_HEIGHT - ARUCO_LIDAR_OFFSET[2]
+        )
+
+        # Filter out any triangles and box tops that are too close to the LiDAR (to avoid self-intersection)
+        filtered_tris = []
+        for tri in sidewall_tris:
+            tri_center = np.mean(tri, axis=0)
+            if np.linalg.norm(tri_center - np.array(lidar_pos)) > 0.5:  # Keep triangles farther than 0.5m from LiDAR
+                filtered_tris.append(tri)
+
+        sidewall_tris = filtered_tris
+
+        filtered_box_tops = []
+        for box in box_tops:
+            box_center = np.mean(box, axis=0)
+            if np.linalg.norm(box_center - np.array(lidar_pos)) > 0.5:  # Keep box tops farther than 0.5m from LiDAR
+                filtered_box_tops.append(box)
+
+        box_tops = filtered_box_tops
 
         triangles_cam = np.array(sidewall_tris, dtype=np.float64)  # (M, 3, 3)
 
@@ -608,7 +745,7 @@ try:
             random_offsets = (np.random.rand(len(hit_points), 1) - 0.5) * noise_magnitude
 
             # 4. Apply the noise along the normal vector
-            hit_points += normals_at_hits * random_offsets
+            #hit_points += normals_at_hits * random_offsets
 
             # print(f"Extended {len(hit_points)} LiDAR points to the detected box sidewalls")
 
@@ -649,13 +786,28 @@ try:
         node.vis.poll_events()
         node.vis.update_renderer()
 
-        # Show camera feed with detected markers
+        # Print marker position on the color image for reference
         cv2.putText(color_image, f"Lidar Pos: ({lidar_pos[0]:.2f}, {lidar_pos[1]:.2f}, {lidar_pos[2]:.2f})m", 
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        
+        # Print box count
+        cv2.putText(depth_colormap, f"Detected Boxes: {len(box_tops)}", 
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        # Visualize sidewall triangles
+        for tri in sidewall_tris:
+            pixel_coords = project_3d_to_2d(np.array(tri), intrinsics)
+            cv2.polylines(depth_colormap, [pixel_coords], isClosed=True, color=(255, 0, 0), thickness=2)
+
+        # Visualize box tops
+        for box in box_tops:
+            pixel_coords = project_3d_to_2d(box, intrinsics)
+            cv2.polylines(depth_colormap, [pixel_coords], isClosed=True, color=(0, 0, 255), thickness=4)
 
         cv2.imshow("Raw RGB Feed", color_image)
+        cv2.imshow("Depth", depth_colormap)
 
-        # Recording & Evaluation
+        # ------ RECORDING & EVALUATION ------
         os.makedirs(VOXEL_RECORD_DIR, exist_ok=True)
 
         key = cv2.waitKey(1) & 0xFF
@@ -667,10 +819,19 @@ try:
             if len(green_pts) > 0:
                 # Find next available index (skip indices that already have an occluded file)
                 idx = 0
-                while os.path.exists(os.path.join(VOXEL_RECORD_DIR, f"occluded_{idx:02d}.npy")):
-                    idx += 1
-                np.save(os.path.join(VOXEL_RECORD_DIR, f"occluded_{idx:02d}.npy"), green_pts)
-                print(f"[RECORD_OCCLUDED] Saved occluded_{idx:02d}.npy — "
+                files = os.listdir(VOXEL_RECORD_DIR)
+                for f in sorted(files):
+                    if f.startswith("occluded_") and f.endswith(".npy"):
+                        existing_idx = int(f.split("_")[1])
+                        if existing_idx == idx:
+                            idx += 1
+                        elif existing_idx > idx:
+                            break  # Found a gap, we can use this index
+
+                v_size_cm = int(VOXEL_SIZE * 100)
+
+                np.save(os.path.join(VOXEL_RECORD_DIR, f"occluded_{idx:02d}_v{v_size_cm}.npy"), green_pts)
+                print(f"[RECORD_OCCLUDED] Saved occluded_{idx:02d}_v{v_size_cm}.npy — "
                         f"{len(green_pts)} green voxels. Now change scene and run RECORD_GT.")
             else:
                 print("[RECORD_OCCLUDED] Skipped — no green points detected")
@@ -680,13 +841,22 @@ try:
             if len(red_pts) > 0:
                 # Find the latest occluded file that has no GT pair yet
                 idx = 0
-                while os.path.exists(os.path.join(VOXEL_RECORD_DIR, f"gt_{idx:02d}.npy")):
-                    idx += 1
-                if not os.path.exists(os.path.join(VOXEL_RECORD_DIR, f"occluded_{idx:02d}.npy")):
-                    print(f"[RECORD_GT] No matching occluded_{idx:02d}.npy found. Record occluded scene first.")
+                files = os.listdir(VOXEL_RECORD_DIR)
+                for f in sorted(files):
+                    if f.startswith("gt_") and f.endswith(".npy"):
+                        existing_idx = int(f.split("_")[1])
+                        if existing_idx == idx:
+                            idx += 1
+                        elif existing_idx > idx:
+                            break  # Found a gap, we can use this index
+
+                v_size_cm = int(VOXEL_SIZE * 100)
+
+                if not os.path.exists(os.path.join(VOXEL_RECORD_DIR, f"occluded_{idx:02d}_v{v_size_cm}.npy")):
+                    print(f"[RECORD_GT] No matching occluded_{idx:02d}_v{v_size_cm}.npy found. Record occluded scene first.")
                 else:
-                    np.save(os.path.join(VOXEL_RECORD_DIR, f"gt_{idx:02d}.npy"), red_pts)
-                    print(f"[RECORD_GT] Saved gt_{idx:02d}.npy — {len(red_pts)} red voxels. Pair {idx:02d} complete.")
+                    np.save(os.path.join(VOXEL_RECORD_DIR, f"gt_{idx:02d}_v{v_size_cm}.npy"), red_pts)
+                    print(f"[RECORD_GT] Saved gt_{idx:02d}_v{v_size_cm}.npy — {len(red_pts)} red voxels. Pair {idx:02d} complete.")
             else:
                 print("[RECORD_GT] Skipped — no red points detected")
 
@@ -695,22 +865,23 @@ try:
             if not pairs:
                 print("[EVALUATE] No recordings found.")
             else:
-                def to_voxel_keys(pts):
-                    return set(map(tuple, np.floor(pts / VOXEL_SIZE).astype(int)))
+                def to_voxel_keys(pts, voxel_size):
+                    return set(map(tuple, np.floor(pts / voxel_size).astype(int)))
 
                 total_precision = 0.0
                 valid_pairs = 0
                 for fname in pairs:
-                    idx = fname.split("_")[1].split(".")[0]
-                    gt_path = os.path.join(VOXEL_RECORD_DIR, f"gt_{idx}.npy")
+                    idx = fname.split("_")[1]
+                    v_size = int(fname.split("_")[2].split(".")[0][1:])
+                    gt_path = os.path.join(VOXEL_RECORD_DIR, f"gt_{idx}_v{v_size}.npy")
                     occ_path = os.path.join(VOXEL_RECORD_DIR, fname)
 
                     if not os.path.exists(gt_path):
                         print(f"  [pair {idx}] Missing GT file, skipping.")
                         continue
 
-                    green_keys = to_voxel_keys(np.load(occ_path))
-                    gt_keys    = to_voxel_keys(np.load(gt_path))
+                    green_keys = to_voxel_keys(np.load(occ_path), v_size / 100.0)
+                    gt_keys    = to_voxel_keys(np.load(gt_path), v_size / 100.0)
 
                     hits = green_keys & gt_keys
                     tp = len(hits)
@@ -722,8 +893,8 @@ try:
 
                     if extra_keys and gt_keys:
                         # Convert keys back to world coordinates (centered in the voxel)
-                        gt_pts = np.array(list(gt_keys)) * VOXEL_SIZE + VOXEL_SIZE / 2
-                        extra_pts = np.array(list(extra_keys)) * VOXEL_SIZE + VOXEL_SIZE / 2
+                        gt_pts = np.array(list(gt_keys)) * (v_size / 100.0) + (v_size / 100.0) / 2
+                        extra_pts = np.array(list(extra_keys)) * (v_size / 100.0) + (v_size / 100.0) / 2
 
                         # Use KDTree for fast "closest point" lookup
                         tree = cKDTree(gt_pts)
@@ -734,7 +905,7 @@ try:
                         avg_dist_error = 0.0
 
                     valid_pairs += 1
-                    print(f"  [Scene {idx}] Predicted: {len(green_keys)} | GT hits: {tp} | Precision: {precision:.2%} | Avg Dist Error: {avg_dist_error * 100:.1f}cm | Max Dist Error: {max_dist_error * 100:.1f}cm")
+                    print(f"  [Scene {idx} V{v_size}] Predicted: {len(green_keys)} | GT hits: {tp} | Precision: {precision:.2%} | Avg Dist Error: {avg_dist_error * 100:.1f}cm | Max Dist Error: {max_dist_error * 100:.1f}cm")
 
                 print(f"[EVALUATE] Avg precision across {valid_pairs} scenes: {total_precision / valid_pairs:.2%}")
 
