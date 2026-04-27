@@ -14,4 +14,4 @@ __pycache__/
 *.ply
 
 # Ignore recordings
-voxel_recordings/
+# voxel_recordings/
