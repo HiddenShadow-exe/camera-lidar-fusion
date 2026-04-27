@@ -41,10 +41,10 @@ z_{\text{ground}} = z_{\text{lidar}} + H_{\text{lidar}} - \text{offset}_z - \eps
 $$
 
 ## Transformation logic
-1. Roate camera points (flip $y$ and $z$ axes)
+1. Rotate camera points (flip $y$ and $z$ axes)
 
 $$
-\mathbf{R}_{\text{cam\\_to\\_lidar}} = \begin{bmatrix} 
+\mathbf{R}_{\mathrm{cam\\_to\\_lidar}} = \begin{bmatrix} 
 1 & 0 & 0 \\ 
 0 & -1 & 0 \\ 
 0 & 0 & -1 
