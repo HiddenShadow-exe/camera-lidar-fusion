@@ -15,3 +15,7 @@ __pycache__/
 
 # Ignore recordings
 # voxel_recordings/
+
+# Ignore generated evaluation results
+fusion/evaluation_results/
+fusion/navigation_visualizations/
