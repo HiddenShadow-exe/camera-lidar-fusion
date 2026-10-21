@@ -28,8 +28,9 @@ print("Connected! Receiving frames...")
 data = b""
 payload_size = struct.calcsize("Q")
 
-LIDAR_HEIGHT = 0.65
-ARUCO_LIDAR_OFFSET = [0, 0, 0]
+LIDAR_HEIGHT = 0.4
+ARUCO_LIDAR_OFFSET = [1.09, 1.0, 0.17]
+GROUND_MARGIN = 0.08
 
 CALIBRATION_BASED = False
 
@@ -103,7 +104,7 @@ def get_boxes_3d(camera_pcd, intrinsics, h, w, floor_z):
 
         # Only keep points that are within 15cm of the top
         # This discards the potential side points that cause stretching
-        top_plane_mask = cluster_pts[:, 2] < (top_z + 0.15)
+        top_plane_mask = cluster_pts[:, 2] < (top_z + 0.1)
         top_plane_pts = cluster_pts[top_plane_mask]
         
         # Project cluster to 2D pixels to find the bounding box
@@ -168,6 +169,12 @@ def get_boxes_3d(camera_pcd, intrinsics, h, w, floor_z):
             
             sidewall_tris.append(enforce_outward(t1))
             sidewall_tris.append(enforce_outward(t2))
+
+        # Add top face triangles
+        t_top1 = [box_3d_top[0], box_3d_top[1], box_3d_top[2]]
+        t_top2 = [box_3d_top[0], box_3d_top[2], box_3d_top[3]]
+        sidewall_tris.append(enforce_outward(t_top1))
+        sidewall_tris.append(enforce_outward(t_top2))
         
     return box_tops, sidewall_tris
 
@@ -442,7 +449,8 @@ try:
 
         # Remove ground plane points
         if lidar_pos[2] > 0:
-            ground_threshold = lidar_pos[2] + LIDAR_HEIGHT - ARUCO_LIDAR_OFFSET[2] - 0.1
+            # ground_threshold = lidar_pos[2] + LIDAR_HEIGHT - ARUCO_LIDAR_OFFSET[2] - 0.1
+            ground_threshold = lidar_pos[2] + LIDAR_HEIGHT - GROUND_MARGIN
             
             # Keep only points that are "higher" (closer to the ceiling) than the floor level.
             non_ground_mask = points[:, 2] < ground_threshold
@@ -511,7 +519,7 @@ try:
             node.raw_camera_pcd,
             intrinsics,
             h, w,
-            floor_z=lidar_pos[2] + LIDAR_HEIGHT - ARUCO_LIDAR_OFFSET[2]
+            floor_z = lidar_pos[2] + LIDAR_HEIGHT
         )
 
         # Filter out any triangles and box tops that are too close to the LiDAR (to avoid self-intersection)
@@ -582,7 +590,7 @@ try:
             random_offsets = (np.random.rand(len(hit_points), 1) - 0.5) * noise_magnitude
 
             # 4. Apply the noise along the normal vector
-            #hit_points += normals_at_hits * random_offsets
+            hit_points += normals_at_hits * random_offsets
 
             # print(f"Extended {len(hit_points)} LiDAR points to the detected box sidewalls")
 
