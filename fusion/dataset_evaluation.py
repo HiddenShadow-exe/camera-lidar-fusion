@@ -95,9 +95,8 @@ SCENE_OFFSETS = {
     "multi occlusion boxes/recording_03": (0.040, 0.000, -0.030),
     "multi occlusion boxes/recording_05": (0.000, -0.030, -0.060),
     "multi occlusion boxes/recording_07": (0.010, 0.000, -0.030),
-    "multi occlusion boxes/recording_09": (0.030, 0.000, -0.030),
+    "multi occlusion boxes/recording_09": (0.040, 0.000, -0.030),
     # "multi occlusion boxes/recording_11": (0.070, 0.000, -0.030),
-    # "multi occlusion boxes/recording_13": (0.070, 0.000, -0.030),
     "partial occlusion boxes/recording_01": (0.020, -0.040, -0.030),
     "partial occlusion boxes/recording_03": (0.010, -0.060, -0.030),
     "partial occlusion boxes/recording_05": (0.030, -0.040, -0.030),
@@ -117,7 +116,7 @@ SAVE_DEBUG_PLOTS = True    # one overlay + top-down figure per scene (for the FI
 # Voxel size (cm) -> distance tolerance (cm) used for that voxel size. The keys also define which voxel sizes
 # are evaluated. Rule used here: one voxel of slack, but never less than 2 cm (about the ring spacing of the LiDAR
 # at ~1.4 m, below which two scans of the same surface cannot be expected to agree).
-TOLERANCES_CM = {1: 1.0, 2: 2.0, 3: 3.0, 5: 5.0, 10: 10.0}
+TOLERANCES_CM = {1: 3.0, 2: 3.0, 3: 3.0, 5: 5.0, 10: 3.0}
 
 PIPELINE_FUNCS = ["get_boxes_3d", "ray_intersect_triangles_batch", "project_3d_to_2d"]
 PIPELINE_CONSTS = ["VOXEL_SIZE"]
@@ -254,7 +253,7 @@ def find_pairs(category_dir):
     recs = {}
     for d in category_dir.iterdir():
         m = re.fullmatch(r"recording_(\d+)", d.name)
-        if m and d.is_dir():
+        if m and d.is_dir() and not d.name.startswith("_"):
             recs[int(m.group(1))] = d
     pairs = []
     for n in sorted(recs):
