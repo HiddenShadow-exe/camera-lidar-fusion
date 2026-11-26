@@ -34,7 +34,7 @@ GROUND_MARGIN = 0.08
 
 CALIBRATION_BASED = False
 
-VOXEL_SIZE = 0.05 # meters
+VOXEL_SIZE = 0.03 # meters
 
 # Evaluation / Recording Setup
 VOXEL_RECORD_DIR  = "voxel_recordings"

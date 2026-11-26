@@ -241,6 +241,7 @@ def edit_3d_obb(rec: dict, data: dict):
     meta = data["meta"]
     obb = build_obb(meta)
     pcd = data["lidar_pcd"]
+    camera_pcd = data["camera_pcd"]
     img = mpimg.imread(data["image_path"]) if data["image_path"] else None
 
     if obb is None or pcd is None or img is None:
@@ -249,6 +250,11 @@ def edit_3d_obb(rec: dict, data: dict):
 
     # Highlight object points in red and background points in gray
     pcd = get_highlighted_pcd(pcd, meta)
+
+    # Process camera point cloud if available (color blue)
+    if camera_pcd is not None and len(camera_pcd.points) > 0:
+        camera_pcd = copy.deepcopy(camera_pcd)
+        camera_pcd.paint_uniform_color([0.0, 0.0, 1.0]) # Blue
 
     # Setup non-blocking matplotlib window for 2D projection
     plt.ion()
@@ -297,6 +303,8 @@ def edit_3d_obb(rec: dict, data: dict):
     vis.create_window(window_name="3D OBB Editor", width=1280, height=800)
     vis.add_geometry(pcd)
     vis.add_geometry(obb)
+    if camera_pcd is not None:
+        vis.add_geometry(camera_pcd)
 
     step = 0.01 # 1cm per keystroke
 

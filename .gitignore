@@ -19,3 +19,12 @@ __pycache__/
 # Ignore generated evaluation results
 fusion/evaluation_results/
 fusion/navigation_visualizations/
+
+# Large files
+*.npy
+work/
+work_*/
+
+# Old dataset
+dataset_old/
+dataset_aug_old/

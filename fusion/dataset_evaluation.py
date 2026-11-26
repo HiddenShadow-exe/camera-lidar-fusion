@@ -79,30 +79,30 @@ GROUND_MARGIN = 0.08    # camera points deeper than (floor - margin) are ground
 #   mode "prediction" -> added to the predicted points AFTER the ray casting (simple translation of the result).
 CALIB_OFFSET = (0.07, 0.0, -0.03)
 SCENE_OFFSETS = {
-    "edgecase occlusion boxes/recording_01": (0.050, 0.000, -0.030),
-    "edgecase occlusion boxes/recording_03": (0.030, 0.000, -0.030),
-    "edgecase occlusion boxes/recording_05": (0.040, -0.010, -0.010),
-    "edgecase occlusion boxes/recording_07": (0.040, 0.000, -0.030),
-    "edgecase occlusion boxes/recording_09": (0.030, 0.000, -0.030),
-    "edgecase occlusion boxes/recording_11": (0.050, 0.000, -0.030),
-    "full occlusion boxes/recording_01": (0.040, -0.010, -0.030),
-    "full occlusion boxes/recording_03": (0.040, -0.010, -0.030),
-    "full occlusion boxes/recording_05": (0.010, -0.020, -0.030),
-    "full occlusion boxes/recording_07": (0.040, 0.000, -0.040),
-    "full occlusion boxes/recording_09": (0.000, -0.010, -0.030),
-    "full occlusion boxes/recording_11": (-0.020, -0.030, -0.110),
-    "multi occlusion boxes/recording_01": (0.030, -0.010, -0.030),
-    "multi occlusion boxes/recording_03": (0.040, 0.000, -0.030),
-    "multi occlusion boxes/recording_05": (0.000, -0.030, -0.060),
-    "multi occlusion boxes/recording_07": (0.010, 0.000, -0.030),
-    "multi occlusion boxes/recording_09": (0.040, 0.000, -0.030),
-    # "multi occlusion boxes/recording_11": (0.070, 0.000, -0.030),
-    "partial occlusion boxes/recording_01": (0.020, -0.040, -0.030),
-    "partial occlusion boxes/recording_03": (0.010, -0.060, -0.030),
-    "partial occlusion boxes/recording_05": (0.030, -0.040, -0.030),
-    "partial occlusion boxes/recording_07": (0.060, -0.020, -0.040),
-    # "partial occlusion boxes/recording_09": (0.070, 0.000, -0.030),
-    "partial occlusion boxes/recording_11": (0.040, 0.000, -0.060),
+    # "edgecase occlusion boxes/recording_01": (0.050, 0.000, -0.030),
+    # "edgecase occlusion boxes/recording_03": (0.030, 0.000, -0.030),
+    # "edgecase occlusion boxes/recording_05": (0.040, -0.010, -0.010),
+    # "edgecase occlusion boxes/recording_07": (0.040, 0.000, -0.030),
+    # "edgecase occlusion boxes/recording_09": (0.030, 0.000, -0.030),
+    # "edgecase occlusion boxes/recording_11": (0.050, 0.000, -0.030),
+    # "full occlusion boxes/recording_01": (0.040, -0.010, -0.030),
+    # "full occlusion boxes/recording_03": (0.040, -0.010, -0.030),
+    # "full occlusion boxes/recording_05": (0.010, -0.020, -0.030),
+    # "full occlusion boxes/recording_07": (0.040, 0.000, -0.040),
+    # "full occlusion boxes/recording_09": (0.000, -0.010, -0.030),
+    # "full occlusion boxes/recording_11": (-0.020, -0.030, -0.110),
+    # "multi occlusion boxes/recording_01": (0.030, -0.010, -0.030),
+    # "multi occlusion boxes/recording_03": (0.040, 0.000, -0.030),
+    # "multi occlusion boxes/recording_05": (0.000, -0.030, -0.060),
+    # "multi occlusion boxes/recording_07": (0.010, 0.000, -0.030),
+    # "multi occlusion boxes/recording_09": (0.040, 0.000, -0.030),
+    # # "multi occlusion boxes/recording_11": (0.070, 0.000, -0.030),
+    # "partial occlusion boxes/recording_01": (0.020, -0.040, -0.030),
+    # "partial occlusion boxes/recording_03": (0.010, -0.060, -0.030),
+    # "partial occlusion boxes/recording_05": (0.030, -0.040, -0.030),
+    # "partial occlusion boxes/recording_07": (0.060, -0.020, -0.040),
+    # # "partial occlusion boxes/recording_09": (0.070, 0.000, -0.030),
+    # "partial occlusion boxes/recording_11": (0.040, 0.000, -0.060),
 }
 CALIB_OFFSET_MODE = "geometry"
 
@@ -116,7 +116,7 @@ SAVE_DEBUG_PLOTS = True    # one overlay + top-down figure per scene (for the FI
 # Voxel size (cm) -> distance tolerance (cm) used for that voxel size. The keys also define which voxel sizes
 # are evaluated. Rule used here: one voxel of slack, but never less than 2 cm (about the ring spacing of the LiDAR
 # at ~1.4 m, below which two scans of the same surface cannot be expected to agree).
-TOLERANCES_CM = {1: 3.0, 2: 3.0, 3: 3.0, 5: 5.0, 10: 3.0}
+TOLERANCES_CM = {1: 3.0, 2: 3.0, 3: 3.0, 5: 5.0}
 
 PIPELINE_FUNCS = ["get_boxes_3d", "ray_intersect_triangles_batch", "project_3d_to_2d"]
 PIPELINE_CONSTS = ["VOXEL_SIZE"]
