@@ -8,7 +8,7 @@
 
 ## Result
 
-![Comparison of four box sources on the final voxel completion](work_v3/stage9/figure_methods_compact.png)
+![Comparison of four box sources on the final voxel completion](figure_methods_compact.png)
 
 *(a) F1 by tolerance, (b, c) where regenerated / hidden cells find their counterpart, (d) per-box F1, (e) worst distance per box, (f) summary. "Best shift in grid" uses the ground truth and is only an upper bound.*
 
